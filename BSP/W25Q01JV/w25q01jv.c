@@ -1,6 +1,13 @@
 #include "w25q01jv.h"
 #include "w25q01jv_port.h"
 
+
+// ---------------------------------------------------------
+#define W25Q_CMD_FAST_READ_4B    0x0C  // 4字节地址快速读 (支持最高 133MHz SPI)
+#define W25Q_CMD_PAGE_PROGRAM_4B 0x12  // 4字节地址页编程
+#define W25Q_CMD_SECTOR_ERASE_4B 0x21  // 4字节地址4KB扇区擦除
+// ---------------------------------------------------------
+
 /**
  * @brief 等待空闲。轮询读取状态寄存器1的Bit0，直到变为0
  */
@@ -100,7 +107,7 @@ static void Build_Command_Header(uint8_t cmd, uint32_t addr, uint8_t *headerBuf)
  */
 void W25Q01JV_EraseSector_4K(uint32_t Address) {
     uint8_t header[5];
-    Build_Command_Header(W25Q_CMD_SECTOR_ERASE, Address, header);
+    Build_Command_Header(W25Q_CMD_SECTOR_ERASE_4B, Address, header);
     
     W25Q01JV_WriteEnable(); // 1. 写使能
     W25Q01JV_WaitBusy();    // 等待使能锁存
@@ -117,9 +124,13 @@ void W25Q01JV_EraseSector_4K(uint32_t Address) {
  */
 void W25Q01JV_WritePage(uint32_t Address, uint8_t *pBuffer, uint16_t Size) {
     uint8_t header[5];
-    if(Size > 256) Size = 256; // 硬件限制，防呆处理
+    // 硬件防呆，防止物理越界回环覆盖
+    uint16_t max_allow = 256 - (Address % 256);
+    if(Size > max_allow) {
+        Size = max_allow; 
+    }
     
-    Build_Command_Header(W25Q_CMD_PAGE_PROGRAM, Address, header);
+    Build_Command_Header(W25Q_CMD_PAGE_PROGRAM_4B, Address, header);
     
     W25Q01JV_WriteEnable();
     W25Q01JV_WaitBusy();
@@ -130,6 +141,46 @@ void W25Q01JV_WritePage(uint32_t Address, uint8_t *pBuffer, uint16_t Size) {
     W25Q01JV_CS_Disable();                // 3. 拉高CS，启动内部烧写
     
     W25Q01JV_WaitBusy();    // 4. 等待烧写完成
+}
+
+/**
+ * @brief 写入任意长度的连续数据 (自动处理页对齐，防止跨页回环)
+ * @param Address  写入的起始绝对地址
+ * @param pBuffer  要写入的数据缓冲区指针
+ * @param Size     要写入的总字节数
+ */
+void W25Q01JV_WriteBuffer(uint32_t Address, uint8_t *pBuffer, uint32_t Size) {
+    // 1. 计算当前地址所在页的剩余空间 (例如地址是250，256-250=6，当前页只能再写6个字节)
+    uint16_t pageremain = 256 - (Address % 256);
+    
+    // 2. 如果要写的数据总长度 <= 当前页剩余空间，说明不会跨页，直接把 pageremain 更新为真实数据长度
+    if (Size <= pageremain) {
+        pageremain = Size; 
+    }
+    
+    // 3. 循环切割写入
+    while (1) {
+        // 调用底层的单页物理写入函数
+        // (注意：底层的 WritePage 里面依然要保留 waitBusy 等待上一次擦写完成的逻辑)
+        W25Q01JV_WritePage(Address, pBuffer, pageremain);
+        
+        // 检查是不是全都写完了
+        if (Size == pageremain) {
+            break; // 数据写完，退出死循环
+        } else {
+            // 还没写完，推进指针和地址，准备写下一页
+            pBuffer += pageremain;   // 数据指针往后移
+            Address += pageremain;   // 物理地址往后移 (此时 Address 一定是对齐到页首的，比如 0x0100)
+            Size -= pageremain;      // 剩余需要写入的长度减少
+            
+            // 计算下一次要写的长度：如果剩余数据大于256，一次最多只能写256；否则把剩下的全写完
+            if (Size > 256) {
+                pageremain = 256;
+            } else {
+                pageremain = Size;
+            }
+        }
+    }
 }
 
 /**
@@ -144,5 +195,36 @@ void W25Q01JV_ReadData(uint32_t Address, uint8_t *pBuffer, uint32_t Size) {
     W25Q01JV_CS_Enable();
     W25Q01JV_SPI_Transmit(header, 5);    // 1. 发送读指令和起始地址
     W25Q01JV_SPI_Receive(pBuffer, Size); // 2. 使用你的批量接收接口，一次性抽回所有数据
+    W25Q01JV_CS_Disable();
+}
+
+/**
+ * @brief 快速读取任意长度数据 (兼容 SPI 时钟 > 50MHz，最高可达 133MHz)
+ * @note  使用 4 字节专属指令 0x0C，自带 4 字节地址解析，无需切换芯片状态
+ * @param Address  256MB范围内的绝对地址 (0x00000000 ~ 0x07FFFFFF)
+ * @param pBuffer  接收数据缓冲区指针
+ * @param Size     要读取的数据字节数
+ */
+void W25Q01JV_FastReadData_4B(uint32_t Address, uint8_t *pBuffer, uint32_t Size) {
+    uint8_t header[6]; 
+    
+    // 1. 拼装 6 字节头部：1字节指令 + 4字节地址 + 1字节 Dummy
+    header[0] = W25Q_CMD_FAST_READ_4B;      // 0x0C 指令
+    header[1] = (Address >> 24) & 0xFF;     // A31-A24
+    header[2] = (Address >> 16) & 0xFF;     // A23-A16
+    header[3] = (Address >> 8)  & 0xFF;     // A15-A8
+    header[4] = Address & 0xFF;             // A7-A0
+    header[5] = 0xFF;                       // 8个 Dummy Clocks (必须发1个字节的空数据)
+    
+    W25Q01JV_WaitBusy(); // 读之前确认芯片不在执行擦写操作
+    
+    W25Q01JV_CS_Enable();
+    
+    // 2. 发送指令、地址和 Dummy Byte
+    W25Q01JV_SPI_Transmit(header, 6); 
+    
+    // 3. 连续接收核心数据 (此时Flash内部已经准备好数据了)
+    W25Q01JV_SPI_Receive(pBuffer, Size); 
+    
     W25Q01JV_CS_Disable();
 }

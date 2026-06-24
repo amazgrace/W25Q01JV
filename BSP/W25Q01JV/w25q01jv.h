@@ -16,9 +16,10 @@
 #define W25Q_CMD_EXIT_4B_MODE       0xE9  // 退出4字节地址模式
 
 // --- 在 4-Byte 模式下的标准读写指令 ---
-#define W25Q_CMD_READ_DATA          0x03  // 读数据
-#define W25Q_CMD_PAGE_PROGRAM       0x02  // 页编程(最大256字节)
-#define W25Q_CMD_SECTOR_ERASE       0x20  // 扇区擦除(4KB)
+#define W25Q_CMD_READ_DATA          0x13  // 普通读数据（50MHz）
+#define W25Q_CMD_FAST_READ_4B       0x0C  // 4字节地址快速读 (最高133MHz)
+#define W25Q_CMD_PAGE_PROGRAM       0x12  // 页编程(最大256字节)
+#define W25Q_CMD_SECTOR_ERASE       0x21  // 扇区擦除(4KB)
 #define W25Q_CMD_BLOCK_ERASE_32K    0x52  // 块擦除(32KB)
 #define W25Q_CMD_BLOCK_ERASE_64K    0xD8  // 块擦除(64KB)
 #define W25Q_CMD_CHIP_ERASE         0xC7  // 整片擦除(慎用)
