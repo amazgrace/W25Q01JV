@@ -27,7 +27,7 @@ uint8_t W25Q01JV_SPI_SwapByte(uint8_t txData) {
 // 接口 2：连续发送数组 (用于页编程写数据、发地址组合)
 void W25Q01JV_SPI_Transmit(uint8_t *pData, uint16_t size) {
     HAL_SPI_Transmit(&hspi5, pData, size, HAL_MAX_DELAY);
-    // 进阶：如果你以后想提高速度，可以直接把这里改成 DMA 方式
+    // 如果想提高速度，可以直接把这里改成 DMA 方式
     // HAL_SPI_Transmit_DMA(&hspi5, pData, size); 
 }
 
