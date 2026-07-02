@@ -2,12 +2,6 @@
 #include "w25q01jv_port.h"
 
 
-// ---------------------------------------------------------
-#define W25Q_CMD_FAST_READ_4B    0x0C  // 4字节地址快速读 (支持最高 133MHz SPI)
-#define W25Q_CMD_PAGE_PROGRAM_4B 0x12  // 4字节地址页编程
-#define W25Q_CMD_SECTOR_ERASE_4B 0x21  // 4字节地址4KB扇区擦除
-// ---------------------------------------------------------
-
 /**
  * @brief 等待空闲。轮询读取状态寄存器1的Bit0，直到变为0
  */
@@ -48,8 +42,8 @@ uint32_t W25Q01JV_Read_JEDEC_ID(void) {
     return id;
 }
 
-uint32_t W25Q01JV_Read_DEVICE_ID(void) {
-    uint32_t id = 0;
+uint16_t W25Q01JV_Read_DEVICE_ID(void) {
+    uint16_t id = 0;
     
     W25Q01JV_CS_Enable();
     W25Q01JV_SPI_SwapByte(W25Q_CMD_DEVICE_ID); // 发送90h
@@ -94,7 +88,7 @@ uint8_t W25Q01JV_Check4ByteMode(void) {
  * @brief 内部静态辅助函数：把1字节指令和4字节地址拼成5个字节的数组
  * 这样就可以直接用你的底层多字节Transmit接口一次性发出去，避免中断打断和冗余代码
  */
-static void Build_Command_Header(uint8_t cmd, uint32_t addr, uint8_t *headerBuf) {
+static void Build_Command_Header_4B(uint8_t cmd, uint32_t addr, uint8_t *headerBuf) {
     headerBuf[0] = cmd;
     headerBuf[1] = (addr >> 24) & 0xFF; // A31-24
     headerBuf[2] = (addr >> 16) & 0xFF; // A23-16
@@ -103,14 +97,35 @@ static void Build_Command_Header(uint8_t cmd, uint32_t addr, uint8_t *headerBuf)
 }
 
 /**
+ * @brief 内部静态函数：拼装 1字节指令 + 3字节地址
+ */
+static void Build_Command_Header(uint8_t cmd, uint32_t addr, uint8_t *headerBuf) {
+    headerBuf[0] = cmd;
+    headerBuf[1] = (addr >> 16) & 0xFF; // A23-16
+    headerBuf[2] = (addr >> 8)  & 0xFF; // A15-8
+    headerBuf[3] = addr & 0xFF;         // A7-0
+}
+
+
+// =========================================================================
+//                            扇区/块擦除指令集合
+// =========================================================================
+
+/**
  * @brief 擦除4KB扇区 (地址必须是 4096 的整数倍)
  */
-void W25Q01JV_EraseSector_4K(uint32_t Address) {
+void W25Q01JV_EraseSector_4K_4B(uint32_t Address) {
     uint8_t header[5];
-    Build_Command_Header(W25Q_CMD_SECTOR_ERASE_4B, Address, header);
+
+    // 4KB 地址对齐校验
+    // 4096 = 0x1000，最低 12 位必须为 0
+    if ((Address & 0x0FFF) != 0) {
+        return; // 地址未对齐，直接拒绝执行，防止误擦除！
+    }
+
+    Build_Command_Header_4B(W25Q_CMD_SECTOR_ERASE_4B, Address, header);
     
     W25Q01JV_WriteEnable(); // 1. 写使能
-    W25Q01JV_WaitBusy();    // 等待使能锁存
     
     W25Q01JV_CS_Enable();
     W25Q01JV_SPI_Transmit(header, 5); // 2. 一次性发送指令+32位地址
@@ -120,9 +135,112 @@ void W25Q01JV_EraseSector_4K(uint32_t Address) {
 }
 
 /**
+ * @brief 擦除64KB块 (4字节地址专属指令版)
+ */
+void W25Q01JV_EraseBlock_64K_4B(uint32_t Address) {
+    uint8_t header[5];
+
+    // 64KB 地址对齐校验
+    // 65536 = 0x10000，最低 16 位必须为 0
+    if ((Address & 0xFFFF) != 0) {
+        return; // 地址未对齐，直接拒绝执行，防止误擦除！
+    }
+
+    Build_Command_Header_4B(W25Q_CMD_BLOCK_ERASE_64K_4B, Address, header);
+    W25Q01JV_WriteEnable(); 
+    W25Q01JV_CS_Enable();
+    W25Q01JV_SPI_Transmit(header, 5); 
+    W25Q01JV_CS_Disable();            
+    W25Q01JV_WaitBusy();    
+}
+
+/**
+ * @brief 擦除4KB扇区 (普通 3 字节地址指令版)
+ * @note  若未进入4字节模式，地址需限制在 0x00FFFFFF 内
+ */
+void W25Q01JV_EraseSector_4K(uint32_t Address) {
+    uint8_t header[4];
+
+    // 4KB 地址对齐校验
+    // 4096 = 0x1000，最低 12 位必须为 0
+    if ((Address & 0x0FFF) != 0) {
+        return; // 地址未对齐，直接拒绝执行，防止误擦除！
+    }
+
+    Build_Command_Header(W25Q_CMD_SECTOR_ERASE, Address, header);
+    W25Q01JV_WriteEnable(); 
+    W25Q01JV_CS_Enable();
+    W25Q01JV_SPI_Transmit(header, 4); 
+    W25Q01JV_CS_Disable();            
+    W25Q01JV_WaitBusy();    
+}
+
+/**
+ * @brief 擦除32KB块 (普通 3 字节地址指令版)
+ */
+void W25Q01JV_EraseBlock_32K(uint32_t Address) {
+    uint8_t header[4];
+
+    // 32KB 地址对齐校验
+    // 32768 = 0x8000，最低 15 位必须为 0
+    if ((Address & 0x7FFF) != 0) {
+        return; // 地址未对齐，直接拒绝执行，防止误擦除！
+    }
+
+    Build_Command_Header(W25Q_CMD_BLOCK_ERASE_32K, Address, header);
+    W25Q01JV_WriteEnable(); 
+    W25Q01JV_CS_Enable();
+    W25Q01JV_SPI_Transmit(header, 4); 
+    W25Q01JV_CS_Disable();            
+    W25Q01JV_WaitBusy();    
+}
+
+/**
+ * @brief 擦除64KB块 (普通 3 字节地址指令版)
+ */
+void W25Q01JV_EraseBlock_64K(uint32_t Address) {
+    uint8_t header[4];
+
+    // 64KB 地址对齐校验
+    // 65536 = 0x10000，最低 16 位必须为 0
+    if ((Address & 0xFFFF) != 0) {
+        return; // 地址未对齐，直接拒绝执行，防止误擦除！
+    }
+
+    Build_Command_Header(W25Q_CMD_BLOCK_ERASE_64K, Address, header);
+    W25Q01JV_WriteEnable(); 
+    W25Q01JV_CS_Enable();
+    W25Q01JV_SPI_Transmit(header, 4); 
+    W25Q01JV_CS_Disable();            
+    W25Q01JV_WaitBusy();    
+}
+
+/**
+ * @brief 全片擦除 (Chip Erase)
+ * @note  警告：1Gb (128MB) 容量的全片擦除极其耗时
+ * 根据芯片手册，全片擦除典型耗时约 400 秒，最大甚至更久。
+ * 调用此函数会导致单片机阻塞几分钟之久。若有看门狗，务必在 WaitBusy 中喂狗
+ */
+void W25Q01JV_EraseChip(void) {
+    W25Q01JV_WriteEnable(); // 1. 写使能
+    
+    W25Q01JV_CS_Enable();
+    W25Q01JV_SPI_SwapByte(W25Q_CMD_CHIP_ERASE); // 2. 仅发送单字节的擦除指令即可
+    W25Q01JV_CS_Disable();                      // 3. 拉高CS，触发Flash内部开始全片擦除
+    
+    W25Q01JV_WaitBusy();    // 4. 死等擦除完成 (极度耗时)
+}
+
+
+
+// =========================================================================
+//                         4 字节地址专属读写指令集合
+// =========================================================================
+
+/**
  * @brief 页编程 (往一页里写数据，Size最大256，不能跨页)
  */
-void W25Q01JV_WritePage(uint32_t Address, uint8_t *pBuffer, uint16_t Size) {
+void W25Q01JV_WritePage_4B(uint32_t Address, uint8_t *pBuffer, uint16_t Size) {
     uint8_t header[5];
     // 硬件防呆，防止物理越界回环覆盖
     uint16_t max_allow = 256 - (Address % 256);
@@ -130,14 +248,13 @@ void W25Q01JV_WritePage(uint32_t Address, uint8_t *pBuffer, uint16_t Size) {
         Size = max_allow; 
     }
     
-    Build_Command_Header(W25Q_CMD_PAGE_PROGRAM_4B, Address, header);
+    Build_Command_Header_4B(W25Q_CMD_PAGE_PROGRAM_4B, Address, header);
     
     W25Q01JV_WriteEnable();
-    W25Q01JV_WaitBusy();
     
     W25Q01JV_CS_Enable();
     W25Q01JV_SPI_Transmit(header, 5);     // 1. 发送头部 (指令+地址)
-    W25Q01JV_SPI_Transmit(pBuffer, Size); // 2. 直接透传业务层数据，零拷贝，效率最高
+    W25Q01JV_SPI_Transmit(pBuffer, Size); // 2. 直接透传业务层数据，不拷贝，效率最高
     W25Q01JV_CS_Disable();                // 3. 拉高CS，启动内部烧写
     
     W25Q01JV_WaitBusy();    // 4. 等待烧写完成
@@ -145,11 +262,13 @@ void W25Q01JV_WritePage(uint32_t Address, uint8_t *pBuffer, uint16_t Size) {
 
 /**
  * @brief 写入任意长度的连续数据 (自动处理页对齐，防止跨页回环)
+ * @note 使用前必须执行擦除，如果数据超过4KB，需要循环擦除多个扇区或者直接调用块擦除
  * @param Address  写入的起始绝对地址
  * @param pBuffer  要写入的数据缓冲区指针
  * @param Size     要写入的总字节数
  */
-void W25Q01JV_WriteBuffer(uint32_t Address, uint8_t *pBuffer, uint32_t Size) {
+void W25Q01JV_WriteBuffer_4B(uint32_t Address, uint8_t *pBuffer, uint32_t Size) {
+    if (Size == 0) return; // 如果没有数据要写，直接返回
     // 1. 计算当前地址所在页的剩余空间 (例如地址是250，256-250=6，当前页只能再写6个字节)
     uint16_t pageremain = 256 - (Address % 256);
     
@@ -162,7 +281,7 @@ void W25Q01JV_WriteBuffer(uint32_t Address, uint8_t *pBuffer, uint32_t Size) {
     while (1) {
         // 调用底层的单页物理写入函数
         // (注意：底层的 WritePage 里面依然要保留 waitBusy 等待上一次擦写完成的逻辑)
-        W25Q01JV_WritePage(Address, pBuffer, pageremain);
+        W25Q01JV_WritePage_4B(Address, pBuffer, pageremain);
         
         // 检查是不是全都写完了
         if (Size == pageremain) {
@@ -185,10 +304,13 @@ void W25Q01JV_WriteBuffer(uint32_t Address, uint8_t *pBuffer, uint32_t Size) {
 
 /**
  * @brief 读取任意长度数据 (跨页读、全片读都没问题，只要时钟不断就会自动递增地址)
+ * @param Address  256MB范围内的绝对地址 (0x00000000 ~ 0x07FFFFFF)
+ * @param pBuffer  接收数据缓冲区指针
+ * @param Size     要读取的数据字节数
  */
-void W25Q01JV_ReadData(uint32_t Address, uint8_t *pBuffer, uint32_t Size) {
+void W25Q01JV_ReadData_4B(uint32_t Address, uint8_t *pBuffer, uint32_t Size) {
     uint8_t header[5];
-    Build_Command_Header(W25Q_CMD_READ_DATA, Address, header);
+    Build_Command_Header_4B(W25Q_CMD_READ_DATA_4B, Address, header);
     
     W25Q01JV_WaitBusy(); // 读之前确认芯片不在干别的重活
     
@@ -227,4 +349,100 @@ void W25Q01JV_FastReadData_4B(uint32_t Address, uint8_t *pBuffer, uint32_t Size)
     W25Q01JV_SPI_Receive(pBuffer, Size); 
     
     W25Q01JV_CS_Disable();
+}
+
+
+
+
+// =========================================================================
+//                         普通 3 字节地址读写指令集合
+// =========================================================================
+
+/**
+ * @brief 普通读数据 (3 字节地址版，最高 50MHz)
+ */
+void W25Q01JV_ReadData(uint32_t Address, uint8_t *pBuffer, uint32_t Size) {
+    uint8_t header[4];
+    Build_Command_Header(W25Q_CMD_READ_DATA, Address, header); 
+    
+    W25Q01JV_WaitBusy(); 
+    
+    W25Q01JV_CS_Enable();
+    W25Q01JV_SPI_Transmit(header, 4);    
+    W25Q01JV_SPI_Receive(pBuffer, Size); 
+    W25Q01JV_CS_Disable();
+}
+
+/**
+ * @brief 快速读数据 (3 字节地址版，兼容 SPI 时钟 > 50MHz)
+ */
+void W25Q01JV_FastReadData(uint32_t Address, uint8_t *pBuffer, uint32_t Size) {
+    uint8_t header[5]; 
+    
+    header[0] = W25Q_CMD_FAST_READ;      
+    header[1] = (Address >> 16) & 0xFF;     
+    header[2] = (Address >> 8)  & 0xFF;     
+    header[3] = Address & 0xFF;             
+    header[4] = 0xFF; // Dummy Byte
+    
+    W25Q01JV_WaitBusy(); 
+    
+    W25Q01JV_CS_Enable();
+    W25Q01JV_SPI_Transmit(header, 5);     
+    W25Q01JV_SPI_Receive(pBuffer, Size);  
+    W25Q01JV_CS_Disable();
+}
+
+/**
+ * @brief 单页编程 (3 字节地址版，仅供 WriteBuffer 调用)
+ */
+void W25Q01JV_WritePage(uint32_t Address, uint8_t *pBuffer, uint16_t Size) {
+    uint8_t header[4];
+    
+    uint16_t max_allow = 256 - (Address % 256);
+    if(Size > max_allow) {
+        Size = max_allow; 
+    }
+    
+    Build_Command_Header(W25Q_CMD_PAGE_PROGRAM, Address, header);
+    
+    W25Q01JV_WriteEnable();
+    
+    W25Q01JV_CS_Enable();
+    W25Q01JV_SPI_Transmit(header, 4);     
+    W25Q01JV_SPI_Transmit(pBuffer, Size); 
+    W25Q01JV_CS_Disable();                
+    
+    W25Q01JV_WaitBusy(); 
+}
+
+/**
+ * @brief 连续写入数据 (3 字节地址版，带自动页对齐切割)
+ */
+void W25Q01JV_WriteBuffer(uint32_t Address, uint8_t *pBuffer, uint32_t Size) {
+    if (Size == 0) return; // 如果没有数据要写，直接返回
+
+    uint16_t pageremain = 256 - (Address % 256); 
+    
+    if (Size <= pageremain) {
+        pageremain = Size; 
+    }
+    
+    while (1) {
+        W25Q01JV_WritePage(Address, pBuffer, pageremain);
+        
+        if (Size == pageremain) {
+            break; 
+        } else {
+            pBuffer += pageremain;   
+            Address += pageremain;   
+            Size -= pageremain;      
+            
+            if (Size > 256) {
+                pageremain = 256;
+            } else {
+                pageremain = Size;
+            }
+        }
+    }
 }

@@ -24,14 +24,52 @@ uint8_t W25Q01JV_SPI_SwapByte(uint8_t txData) {
     return rxData;
 }
 
-// 接口 2：连续发送数组 (用于页编程写数据、发地址组合)
-void W25Q01JV_SPI_Transmit(uint8_t *pData, uint16_t size) {
-    HAL_SPI_Transmit(&hspi5, pData, size, HAL_MAX_DELAY);
-    // 如果想提高速度，可以直接把这里改成 DMA 方式
-    // HAL_SPI_Transmit_DMA(&hspi5, pData, size); 
+/**
+ * @brief SPI 底层多字节发送接口 (带超大容量分块防溢出机制)
+ * @param pData 要发送的数据指针
+ * @param size  要发送的总字节数 (32位，支持发送超过64KB的数据)
+ */
+void W25Q01JV_SPI_Transmit(uint8_t *pData, uint32_t size) {
+    uint32_t remain_size = size;    // 剩余需要发送的长度
+    uint8_t *pBuffer = pData;       // 当前数据发送指针
+    uint16_t current_transmit;      // 本次实际交给 HAL 库的发送长度
+
+    while (remain_size > 0) {
+        // 迎合 HAL 库的 16 位参数限制，超过 65535 就切片
+        if (remain_size > 65535) {
+            current_transmit = 65535;
+        } else {
+            current_transmit = (uint16_t)remain_size;
+        }
+        
+        // 调用 HAL 库，发送这一小块
+        HAL_SPI_Transmit(&hspi5, pBuffer, current_transmit, HAL_MAX_DELAY);
+        
+        // 推进指针，扣减剩余长度
+        pBuffer += current_transmit;
+        remain_size -= current_transmit;
+    }
 }
 
 // 接口 3：连续接收数组 (用于读取 Flash 数据)
-void W25Q01JV_SPI_Receive(uint8_t *pData, uint16_t size) {
-    HAL_SPI_Receive(&hspi5, pData, size, HAL_MAX_DELAY);
+void W25Q01JV_SPI_Receive(uint8_t *pData, uint32_t size) {
+    uint32_t remain_size = size;    // 剩余需要读取的长度
+    uint8_t *pBuffer = pData;       // 当前数据存放指针
+    uint16_t current_read;          // 本次实际交给 HAL 库的读取长度
+
+    while (remain_size > 0) {
+        // 如果剩余数据大于 65535 (uint16_t 上限)，就按 65535 切一刀；否则就把剩下的全读完
+        if (remain_size > 65535) {
+            current_read = 65535;
+        } else {
+            current_read = (uint16_t)remain_size;
+        }
+        
+        // 调用 HAL 库，读这一小块
+        HAL_SPI_Receive(&hspi5, pBuffer, current_read, HAL_MAX_DELAY);
+        
+        // 推进指针，扣减剩余长度
+        pBuffer += current_read;
+        remain_size -= current_read;
+    }
 }

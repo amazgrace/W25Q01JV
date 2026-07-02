@@ -12,7 +12,9 @@
                 "C:\\Keil_v5\\ARM\\ARMCC\\include\\rw",
                 "c:\\stm32cubeidebenkyou\\W25Q01JV\\W25Q01JV_TEST\\MDK-ARM",
                 "c:\\stm32cubeidebenkyou\\W25Q01JV\\W25Q01JV_TEST\\Core\\Src",
-                "c:\\stm32cubeidebenkyou\\W25Q01JV\\W25Q01JV_TEST\\Drivers\\STM32F4xx_HAL_Driver\\Src"
+                "c:\\stm32cubeidebenkyou\\W25Q01JV\\W25Q01JV_TEST\\Drivers\\STM32F4xx_HAL_Driver\\Src",
+                "c:\\stm32cubeidebenkyou\\W25Q01JV\\W25Q01JV_TEST\\APP",
+                "c:\\stm32cubeidebenkyou\\W25Q01JV\\W25Q01JV_TEST\\BSP\\W25Q01JV"
             ],
             "defines": [
                 "USE_HAL_DRIVER",
