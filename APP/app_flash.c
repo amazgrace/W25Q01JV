@@ -54,3 +54,81 @@ void App_Flash_LoadParam(SysParam_t *pParam) {
         printf("[APP_FLASH] Parameters Loaded. Boot Count: %d\r\n", pParam->boot_count);
     }
 }
+
+/**
+ * @brief Flash 读写可靠性测试
+ * @note  真测真写：
+ *        1. 擦除 -> 2. 写入特定模式 -> 3. 读取 -> 4. 逐字节比对
+ *        全部通过才算测试成功，只要有一个字节不对就报 FAIL
+ */
+void App_Flash_Test(void) {
+    uint8_t write_buf[256];
+    uint8_t read_buf[256];
+    uint32_t test_addr = FLASH_PART_USER_DATA;  // 用分区表里第二个扇区来测试
+
+    printf("\r\n");
+    printf("========================================\r\n");
+    printf("  W25Q01JV Flash Read/Write Test Start\r\n");
+    printf("========================================\r\n");
+
+    // -------------------------------------------------
+    // Step 1: 准备测试数据 — 使用多种模式交叉填充
+    // -------------------------------------------------
+    // 模式1: 递增数 (0x00, 0x01, 0x02 ... 0xFF)
+    for (int i = 0; i < 128; i++) {
+        write_buf[i] = (uint8_t)i;
+    }
+    // 模式2: 固定值交错 (0xAA, 0x55, 0xAA, 0x55 ...)
+    for (int i = 128; i < 256; i++) {
+        write_buf[i] = (i % 2 == 0) ? 0xAA : 0x55;
+    }
+
+    printf("[TEST] Test Pattern Generated.\r\n");
+
+    // -------------------------------------------------
+    // Step 2: 擦除测试扇区
+    // -------------------------------------------------
+    printf("[TEST] Erasing Sector (0x%08lX)...\r\n", test_addr);
+    W25Q01JV_EraseSector_4K_4B(test_addr);
+    printf("[TEST] Erase Done.\r\n");
+
+    // -------------------------------------------------
+    // Step 3: 写入 256 字节 (正好一页)
+    // -------------------------------------------------
+    printf("[TEST] Writing 256 bytes to 0x%08lX...\r\n", test_addr);
+    W25Q01JV_WriteBuffer_4B(test_addr, write_buf, 256);
+    printf("[TEST] Write Done.\r\n");
+
+    // -------------------------------------------------
+    // Step 4: 读取回来
+    // -------------------------------------------------
+    printf("[TEST] Reading back 256 bytes from 0x%08lX...\r\n", test_addr);
+    memset(read_buf, 0x00, 256);
+    W25Q01JV_ReadData_4B(test_addr, read_buf, 256);
+    printf("[TEST] Read Done.\r\n");
+
+    // -------------------------------------------------
+    // Step 5: 逐字节比对
+    // -------------------------------------------------
+    uint32_t error_count = 0;
+    for (int i = 0; i < 256; i++) {
+        if (write_buf[i] != read_buf[i]) {
+            error_count++;
+            if (error_count <= 5) {  // 只打印前 5 个错误，避免刷屏
+                printf("[TEST]  MISMATCH at offset %d: wrote 0x%02X, read 0x%02X\r\n",
+                       i, write_buf[i], read_buf[i]);
+            }
+        }
+    }
+
+    // -------------------------------------------------
+    // Step 6: 打印测试结论
+    // -------------------------------------------------
+    printf("----------------------------------------\r\n");
+    if (error_count == 0) {
+        printf("[TEST] RESULT: PASS! All 256 bytes match.\r\n");
+    } else {
+        printf("[TEST] RESULT: FAIL! %lu mismatches found.\r\n", error_count);
+    }
+    printf("========================================\r\n\r\n");
+}

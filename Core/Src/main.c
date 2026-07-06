@@ -19,11 +19,12 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "spi.h"
+#include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "app_flash.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -88,16 +89,39 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_SPI5_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
+  SysParam_t sysParam;
 
+  // 检测 Flash 是否挂载成功
+  App_Flash_Init();
+
+  // 运行完整的读写可靠性测试
+  App_Flash_Test();
+
+  // 从 Flash 加载系统参数（如果是第一次开机，会自动初始化默认值并存回 Flash）
+  App_Flash_LoadParam(&sysParam);
+
+  // 在 while 循环里，每次开机计数+1
+  sysParam.boot_count++;
+  printf("[MAIN] Current Boot Count: %d\r\n", sysParam.boot_count);
+  printf("[MAIN] Target Temperature: %.1f\r\n", sysParam.target_temp);
+  printf("[MAIN] IP Address: %d.%d.%d.%d\r\n",
+         sysParam.ip_addr[0], sysParam.ip_addr[1],
+         sysParam.ip_addr[2], sysParam.ip_addr[3]);
+
+  // 写回 Flash（保存更新后的开机次数）
+  App_Flash_SaveParam(&sysParam);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    HAL_Delay(1000);      // 每 1 秒打印一次
+    printf("[MAIN] System Running... Boot Count: %d\r\n", sysParam.boot_count);
     /* USER CODE END WHILE */
-
+    
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
