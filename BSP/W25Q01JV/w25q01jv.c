@@ -26,7 +26,7 @@ void W25Q01JV_WriteEnable(void) {
 }
 
 /**
- * @brief 读芯片ID (W25Q01JV应该返回 0xEF4021)
+ * @brief 读芯片JEDEC识别ID (W25Q01JV应该返回 0xEF4021)
  */
 uint32_t W25Q01JV_Read_JEDEC_ID(void) {
     uint32_t id = 0;
@@ -42,6 +42,9 @@ uint32_t W25Q01JV_Read_JEDEC_ID(void) {
     return id;
 }
 
+/**
+ * @brief 读芯片设备ID (W25Q01JV应该返回 0xEF20)
+ */
 uint16_t W25Q01JV_Read_DEVICE_ID(void) {
     uint16_t id = 0;
     

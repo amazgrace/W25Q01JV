@@ -132,3 +132,24 @@ void App_Flash_Test(void) {
     }
     printf("========================================\r\n\r\n");
 }
+
+void App_Flash_FactoryReset(void) {
+    printf("\r\n");
+    printf("========================================\r\n");
+    printf("  Factory Reset: Erasing All Sectors...\r\n");
+    printf("========================================\r\n");
+
+    // 擦除系统参数扇区（扇区0）
+    printf("[APP_FLASH] Erasing System Parameter Sector (0x%08lX)...\r\n", FLASH_PART_SYS_PARAM);
+    W25Q01JV_EraseSector_4K_4B(FLASH_PART_SYS_PARAM);
+    printf("[APP_FLASH] Done.\r\n");
+
+    // 擦除用户测试数据扇区（扇区1）
+    printf("[APP_FLASH] Erasing User Data Sector (0x%08lX)...\r\n", FLASH_PART_USER_DATA);
+    W25Q01JV_EraseSector_4K_4B(FLASH_PART_USER_DATA);
+    printf("[APP_FLASH] Done.\r\n");
+
+    printf("========================================\r\n");
+    printf("  Factory Reset Complete! \r\n");
+    printf("========================================\r\n\r\n");
+}

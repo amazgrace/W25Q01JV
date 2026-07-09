@@ -96,14 +96,22 @@ int main(void)
   // 检测 Flash 是否挂载成功
   App_Flash_Init();
 
+  // ============ 首次刷机时取消注释以下行，运行一次后重新注释掉 ============
+  // App_Flash_FactoryReset();   // 抹掉 Flash 里所有旧数据，确保从头开始
+  // =======================================================================
+
   // 运行完整的读写可靠性测试
   App_Flash_Test();
 
   // 从 Flash 加载系统参数（如果是第一次开机，会自动初始化默认值并存回 Flash）
   App_Flash_LoadParam(&sysParam);
 
-  // 在 while 循环里，每次开机计数+1
+
+  // 先打印 Flash 原始值
+  printf("[MAIN] Flash Raw Boot Count: %d\r\n", sysParam.boot_count);
+  // 每次开机计数+1
   sysParam.boot_count++;
+  // 打印更新后的计数值
   printf("[MAIN] Current Boot Count: %d\r\n", sysParam.boot_count);
   printf("[MAIN] Target Temperature: %.1f\r\n", sysParam.target_temp);
   printf("[MAIN] IP Address: %d.%d.%d.%d\r\n",
@@ -118,7 +126,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    HAL_Delay(1000);      // 每 1 秒打印一次
+    HAL_Delay(3000);      // 每 3 秒打印一次
     printf("[MAIN] System Running... Boot Count: %d\r\n", sysParam.boot_count);
     /* USER CODE END WHILE */
     

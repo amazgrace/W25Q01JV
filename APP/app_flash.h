@@ -31,5 +31,6 @@ void App_Flash_Init(void);
 void App_Flash_Test(void); 
 void App_Flash_SaveParam(SysParam_t *pParam);
 void App_Flash_LoadParam(SysParam_t *pParam);
+void App_Flash_FactoryReset(void);
 
 #endif
